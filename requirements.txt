@@ -1,0 +1,4 @@
+pandas
+pyasn1
+pycrypto
+plistlib
