@@ -38,6 +38,7 @@ from Crypto.Cipher import AES
 from pyasn1.codec.der.decoder import decode
 from base64 import b64encode
 import plistlib
+import time
 
 # path to connect to keychain db
 # can be found in /private/var/Keychains/keychain-2.db
@@ -93,7 +94,12 @@ def unwrap_key(key, keyclass):
 			shell=False,
 			stdout=subprocess.PIPE,
 			stderr=subprocess.PIPE)
-		unwrapped_key = ssh.stdout.readlines()[0]
+		time.sleep(0.1)
+		out = ssh.stdout.readlines()
+		while out == 0:
+			out = ssh.stdout.readlines()
+			time.sleep(1)
+		unwrapped_key = out[0]
 	return unwrapped_key
 
 
@@ -119,8 +125,10 @@ def decrypt_secretData(item):
 
 		der_data = decode(decrypted)[0]
 		for k in der_data:
-			if 'v_Data' in k[0]:
-				item['v_Data'] = b64encode(bytes(k[1])).decode('ascii')
+			if 'Octet' in str(type(k[1])):
+				item['decrypted'].update({str(k[0]) : bytes(k[1])})
+			else:
+				item['decrypted'].update({str(k[0]) : str(k[1])})
 	return item
 
 
@@ -154,15 +162,12 @@ def decrypt_Metadata(item, df_meta):
 		gcm = AES.new(metadata_key[:32], AES.MODE_GCM, iv)
 		decrypted = gcm.decrypt_and_verify(ciphertext, authCode)
 		der_data = decode(decrypted)[0]
+		item['decrypted'] = {}
 		for k in der_data:
-			if 'acct' in k[0]:
-				item['acct'] = b64encode(bytes(k[1])).decode('ascii')
-			elif 'labl' in k[0]:
-				item['labl'] = b64encode(bytes(k[1])).decode('ascii')
-			elif 'svce' in k[0]:
-				item['svce'] = b64encode(bytes(k[1])).decode('ascii')
-			elif 'desc' in k[0]:
-				item['desc'] = b64encode(bytes(k[1])).decode('ascii')
+			if 'Octet' in str(type(k[1])):
+				item['decrypted'][str(k[0])] = bytes(k[1])
+			else:
+				item['decrypted'][str(k[0])] = str(k[1])
 
 
 	return item
@@ -183,12 +188,13 @@ def main():
 	"""
 	SELECT * FROM genp;
 	""", db)
-	df_genp['desc'] = df_genp['desc'].apply(lambda r: b64encode(bytes(r)).decode('ascii') if r is not None else '')
-	df_genp['labl'] = df_genp['labl'].apply(lambda r: b64encode(bytes(r)).decode('ascii') if r is not None else '')
-	df_genp['gena'] = df_genp['gena'].apply(lambda r: b64encode(bytes(r)).decode('ascii') if r is not None else '')
-	df_genp['svce'] = df_genp['svce'].apply(lambda r: b64encode(bytes(r)).decode('ascii') if r is not None else '')
-	df_genp['sha1'] = df_genp['sha1'].apply(lambda r: b64encode(bytes(r)).decode('ascii') if r is not None else '')
-	df_genp['acct'] = df_genp['acct'].apply(lambda r: b64encode(bytes(r)).decode('ascii') if r is not None else '')
+
+	# extract data from internet password table
+	df_inet = pandas.read_sql_query(
+	"""
+	SELECT * FROM inet;
+	""", db)
+
 
 	# extract metadata class keys to decrypt metadata
 	df_meta = pandas.read_sql_query(
@@ -200,15 +206,23 @@ def main():
 
 	# decrypt
 	df_genp = df_genp.apply(lambda r: deserialize_data(r), axis=1)
-	df_genp = df_genp.apply(lambda r: decrypt_secretData(r), axis=1)
 	df_genp = df_genp.apply(lambda r: decrypt_Metadata(r, df_meta), axis=1)
+	df_genp = df_genp.apply(lambda r: decrypt_secretData(r), axis=1)
 
+	df_inet = df_inet.apply(lambda r: deserialize_data(r), axis=1)
+	df_inet = df_inet.apply(lambda r: decrypt_Metadata(r, df_meta), axis=1)
+	df_inet = df_inet.apply(lambda r: decrypt_secretData(r), axis=1)
+
+	res_dict = {
+		'genp': df_genp['decrypted'].to_list(),
+		'inet': df_inet['decrypted'].to_list()
+	}
+	
 
 	# Exporting result
-	out_dict = df_genp[['rowid','cdat','mdat','desc','labl','agrp','pdmn','gena','sha1','vwht','UUID','acct','v_Data']].to_dict('records')
 
 	with open("keychain_decrypted.plist","wb") as out:
-		plistlib.dump(out_dict, out, sort_keys=False )
+		plistlib.dump(res_dict, out, sort_keys=False )
 
 if __name__ == "__main__":
     main()
