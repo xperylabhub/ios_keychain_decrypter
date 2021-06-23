@@ -99,7 +99,12 @@ def unwrap_key(key, keyclass):
 		while out == 0:
 			out = ssh.stdout.readlines()
 			time.sleep(1)
-		unwrapped_key = out[0]
+		if len(out) > 0:
+			unwrapped_key = out[0]
+		else: 
+			print ("error unwrapping key of keyclass {}: {} \n Trying again...".format(keyclass, hexlify(key)))
+			unwrapped_key = unwrap_key(key, keyclass)
+			
 	return unwrapped_key
 
 
