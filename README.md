@@ -9,7 +9,9 @@ Windows support may require to adapt ssh commandlines
 
 ## Requirements
 ```
-pip install requirements.txt
+brew install hudochenkov/sshpass/sshpass # Install sshpass which is script use.
+pipenv shell
+pipenv install # this will install python package which in Pipfile
 ```
 Jailbroken device accessible via ssh (default checkra1n behaviour)
 `sshpass`, `ssh` and `iproxy` configured in your PATH
